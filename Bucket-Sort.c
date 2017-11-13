@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <mpi.h>
 
 unsigned int tamvet;
 unsigned int nbuckets;
-//unsigned int nprocs;
+unsigned int nprocs;
 unsigned int flag;
 
 typedef struct Bucket {
@@ -17,16 +18,16 @@ void setRandomValuesToVector(int vector[]);  //  Seta valores aleatorios ao veto
 void createInternalBuckets(int *vector, Bucket *buckets);  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets);  //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
 void ordenateBuckets(Bucket *buckets);  //  Usado pelos processos MPI para ordenar cada bucket.
-void concatenateBuckets();  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
+void concatenateBuckets(int *vector, Bucket *buckets);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
 
 int main(int argc, char *argv[]) {
 	//  Recebendo dados via Linha de Comando.
 	//  Verifica se todos os dados est�o inseridos, caso contrario, pede ao usuario para reexecutar o programa segundo as instru��es.
-	if(argc != 4){
+	if(argc != 4) {
 		printf("Uso:\n");
 		printf("\t%s <Tamanho Vetor> <Numeros de Buckets> <Flag(1 ou 0)> \n", argv[0]);
 		printf("Lembrete: Deixe um espaco entre cada numero \n");
-		return 1;
+		return 0;
 	}
 
 	//  Passando dados para sua determinadas variaveis.
@@ -34,20 +35,25 @@ int main(int argc, char *argv[]) {
 	nbuckets = atoi(argv[2]);
 	flag = atoi(argv[3]);
 
+	if(nbuckets > tamvet) {
+		printf("ERRO! Numero de buckets nao pode ser maior que o numero de vetores \n");
+		return 0;
+	}
+
 	//  Alocando espa�o na memoria para o vetor desordenado.
 	int *vector = (int *) malloc (sizeof(int) * tamvet);
 
-	//int rank;
+	int rank;
 
 	//  ************************************************************************
 	//  Inicio do ambiente MPI com N processos
-	//MPI_Init(&argc, &argv);
-	//MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	//MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+	MPI_Init(&argc, &argv);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
 	setRandomValuesToVector(vector);  //  Cada processo MPI seta em um intervalo de posi��es diferentes no vetor desordenado
 
-	if (flag == 1) // && (rank == 0 ))  // Só o rank mestre irá printar
+	if (flag == 1)  // Só o rank mestre irá printar
 		printVector(vector);
 
 	Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * nbuckets);  //  Aloca na memoria um vetor de buckets com o numero de buckets requisitado pelo usuario
@@ -64,7 +70,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	printf("\n\n\n");
+	printf("\n");
 
 	ordenateBuckets(buckets);
 
@@ -76,17 +82,14 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	printf("\n\n\n");
+	printf("\n");
 
-	for (int i = 0; i < nbuckets; i++) {
-		for (int j = 0; j < buckets[i].quant; j++) {
-			printf ("%d\n", buckets[i].bucket_vector[j]);
-		}
-	}
+	concatenateBuckets(vector, buckets);
 
+	if (flag == 1)  // Só o rank mestre irá printar
+		printVector(vector);
 
-
-	//MPI_Finalize();
+	MPI_Finalize();
 	//  ************************************************************************
 	//  Fim do ambiente MPI
 
@@ -170,8 +173,14 @@ void ordenateBuckets(Bucket *buckets) {
 	}
 }
 
-void concatenateBuckets() {
-
+void concatenateBuckets(int *vector, Bucket *buckets) {
+	int cont = 0;
+	for (int i = 0; i < nbuckets; i++) {
+		for (int j = 0; j < buckets[i].quant; j++) {
+			vector[cont] = buckets[i].bucket_vector[j];
+			cont++;
+		}
+	}
 }
 
 void printVector(int vector[]) {
