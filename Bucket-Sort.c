@@ -7,6 +7,7 @@ unsigned int tamvet;
 unsigned int nbuckets;
 unsigned int nprocs;
 unsigned int flag;
+int rank;
 
 typedef struct Bucket {
 	unsigned int min, max, quant;
@@ -28,22 +29,17 @@ int main(int argc, char *argv[]) {
 		printf("\t%s <Tamanho Vetor> <Numeros de Buckets> <Flag(1 ou 0)> \n", argv[0]);
 		printf("Lembrete: Deixe um espaco entre cada numero \n");
 		return 0;
+	} else {
+		//  Passando dados para sua determinadas variaveis.
+		tamvet = atoi(argv[1]);
+		nbuckets = atoi(argv[2]);
+		flag = atoi(argv[3]);
+		//  Verificando condição que o numero de buckets não deve ser maior que o tamanho do vetor
+		if(nbuckets > tamvet) {
+			printf("ERRO! Numero de buckets nao pode ser maior que o numero de vetores \n");
+			return 0;
+		}
 	}
-
-	//  Passando dados para sua determinadas variaveis.
-	tamvet = atoi(argv[1]);
-	nbuckets = atoi(argv[2]);
-	flag = atoi(argv[3]);
-
-	if(nbuckets > tamvet) {
-		printf("ERRO! Numero de buckets nao pode ser maior que o numero de vetores \n");
-		return 0;
-	}
-
-	//  Alocando espa�o na memoria para o vetor desordenado.
-	int *vector = (int *) malloc (sizeof(int) * tamvet);
-
-	int rank;
 
 	//  ************************************************************************
 	//  Inicio do ambiente MPI com N processos
@@ -51,43 +47,27 @@ int main(int argc, char *argv[]) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-	setRandomValuesToVector(vector);  //  Cada processo MPI seta em um intervalo de posi��es diferentes no vetor desordenado
+	printf("Processo com rank %d criado\n", rank);
 
-	if (flag == 1)  // Só o rank mestre irá printar
-		printVector(vector);
+	int *vector = (int *) malloc (sizeof(int) * tamvet);
 
-	Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * nbuckets);  //  Aloca na memoria um vetor de buckets com o numero de buckets requisitado pelo usuario
+	//  Um unico processo seta os valores randomico (Visto que seria mais rapido do que separar a tarefa para todos os processo)
+	//  Vetor com os valores randomicos é transmitido a todos os processos
+	if (rank == 0) {
+		setRandomValuesToVector(vector);
+		MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
+	}
+	MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
 
-	createInternalBuckets(vector, buckets);
+	MPI_Barrier(MPI_COMM_WORLD);
 
-	setIntervalValuesInBuckets(vector, buckets);
-
-	for (int i = 0; i < nbuckets; i++) {
-		if (buckets[i].quant > 0) {
-			printf ("\n Bucket (%d) : Minino = %d, Maximo = %d, Quantidade = %d", i , buckets[i].min, buckets[i].max, buckets[i].quant);
-			for (int j = 0; j < buckets[i].quant; j++)
-				printf ("\n        Valor (%d) = %d", j, buckets[i].bucket_vector[j]);
-		}
+	if (rank == 0) {
+		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * nbuckets);  //  Aloca na memoria de todos os processos um vetor de buckets
 	}
 
-	printf("\n");
 
-	ordenateBuckets(buckets);
 
-	for (int i = 0; i < nbuckets; i++) {
-		if (buckets[i].quant > 0) {
-			printf ("\n Bucket (%d) : Minino = %d, Maximo = %d, Quantidade = %d", i , buckets[i].min, buckets[i].max, buckets[i].quant);
-			for (int j = 0; j < buckets[i].quant; j++)
-				printf ("\n        Valor (%d) = %d", j, buckets[i].bucket_vector[j]);
-		}
-	}
 
-	printf("\n");
-
-	concatenateBuckets(vector, buckets);
-
-	if (flag == 1)  // Só o rank mestre irá printar
-		printVector(vector);
 
 	MPI_Finalize();
 	//  ************************************************************************
@@ -97,48 +77,54 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
+void createInternalBucket(int *vector, Bucket *bucket) {
+
+}
+
 void createInternalBuckets(int  *vector, Bucket *buckets) {
-	if (tamvet % nbuckets == 0) {  //  Se a quantidade de numeros em cada bucket for igual (Resto da divisao de tamvet por nbuckets = 0)
-		for (int i = 0; i < nbuckets; i++) {
-			int count = 0;
-			for (int n = 0; n < tamvet; n++) {
-				if(vector[n] >= (i*(tamvet/nbuckets)) && vector[n] <= ((i+1)*(tamvet/nbuckets))-1 )
-					count++;
-			}
-			if (count > 0) {
-				buckets[i].quant = count;
-				buckets[i].min = (i*(tamvet/nbuckets));
-				buckets[i].max = ((i+1)*(tamvet/nbuckets))-1;
-				buckets[i].bucket_vector = (int *) malloc (sizeof(int) * count);
-			}
-		}
+	int iterator = 0, quant_plus = tamvet % nbuckets, inequal_buckets = 0;
+
+	if (tamvet % nbuckets == 0) {
+		iterator = nbuckets;
 	} else {
-		int quant_plus = tamvet % nbuckets;
-		for (int i = 0; i < nbuckets - quant_plus; i++) {
-			int count = 0;
-			for (int n = 0; n < tamvet; n++) {
-				if(vector[n] >= (i*(tamvet/nbuckets)) && vector[n] <= ((i+1)*(tamvet/nbuckets))-1 )
-					count++;
-			}
-			if (count > 0) {
-				buckets[i].quant = count;
-				buckets[i].min = (i*(tamvet/nbuckets));
-				buckets[i].max = ((i+1)*(tamvet/nbuckets))-1;
-				buckets[i].bucket_vector = (int *) malloc (sizeof(int) * count);
-			}
+		iterator = nbuckets - quant_plus;
+		inequal_buckets = 1;
+	}
+
+	for (int i = 0; i < iterator; i++) {
+		int count = 0;
+		buckets[i].min = (i*(tamvet/nbuckets));
+		buckets[i].max = ((i+1)*(tamvet/nbuckets))-1;
+
+		for (int j = 0; j < tamvet; j++) {
+			if ((vector[j] >= buckets[i].min) && (vector[j] <= buckets[i].max))
+				count++;
 		}
-		for (int i = nbuckets - quant_plus; i < nbuckets; i++) {
+
+		if (count > 0) {
+			buckets[i].quant = count;
+			buckets[i].bucket_vector = (int *) malloc (sizeof(int) * count);
+		} else {
+			//  Função deleta bucket
+		}
+	}
+
+	if (inequal_buckets == 1) {
+		for (int i = iterator; i < nbuckets; i++) {
 			int count = 0;
 			 buckets[i].min = buckets[i-1].max + 1;
 			 buckets[i].max =  buckets[i].min + (tamvet/nbuckets);
 
-			for (int n = 0; n < tamvet; n++) {
-				if(vector[n] >= buckets[i].min && vector[n] <= buckets[i].max)
+			for (int j = 0; j < tamvet; j++) {
+				if(vector[j] >= buckets[i].min && vector[j] <= buckets[i].max)
 					count++;
 			}
+
 			if (count > 0) {
 				buckets[i].quant = count;
 				buckets[i].bucket_vector = (int *) malloc (sizeof(int) * count);
+			} else {
+				//  Função deleta bucket
 			}
 		}
 	}
@@ -184,7 +170,7 @@ void concatenateBuckets(int *vector, Bucket *buckets) {
 }
 
 void printVector(int vector[]) {
-	printf("Abaixo será apresentado o vetor de %d posições com seus valores atuais:\n\n", tamvet);
+	printf("\nAbaixo será apresentado o vetor de %d posições com seus valores atuais:\n\n", tamvet);
 	for(int i = 0; i < tamvet; i++){
 			printf("Posição ( %d ), Valor = %d",i, vector[i]);
 			printf("\n");
@@ -192,7 +178,7 @@ void printVector(int vector[]) {
 	printf("\n");
 }
 
-void setRandomValuesToVector( int vector[]) {
+void setRandomValuesToVector(int vector[]) {
 	srand(time(NULL));
 	for(int i = 0 ; i < tamvet ; i++)
 		vector[i] = rand() % (tamvet-1);
