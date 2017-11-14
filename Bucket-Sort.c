@@ -16,11 +16,11 @@ typedef struct Bucket {
 
 void printVector(int vector[]);  //  Usado para printar tanto o vetor original desordenado quanto o vetor ordenado posteriormente.
 void setRandomValuesToVector(int vector[]);  //  Seta valores aleatorios ao vetor desordenado.
-void createInternalBuckets(int *vector, Bucket *buckets);  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
+void createInternalBuckets(int *vector, Bucket *buckets, int nbuckets_aux);  // Usado pelos processos MPI para setar os atributos MAX e MIN e QUANT de seus buckets
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets);  //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
 void ordenateBuckets(Bucket *buckets);  //  Usado pelos processos MPI para ordenar cada bucket.
 void concatenateBuckets(int *vector, Bucket *buckets);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
-void createBucketsInProcesses(Bucket *buckets);
+int createBucketsInProcesses(Bucket *buckets);  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
 
 int main(int argc, char *argv[]) {
 	//  Recebendo dados via Linha de Comando.
@@ -48,8 +48,6 @@ int main(int argc, char *argv[]) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-	printf("Processo com rank %d criado\n", rank);
-
 	int *vector = (int *) malloc (sizeof(int) * tamvet);
 
 	//  Um unico processo seta os valores randomico (Visto que seria mais rapido do que separar a tarefa para todos os processo)
@@ -57,25 +55,26 @@ int main(int argc, char *argv[]) {
 	if (rank == 0) {
 		setRandomValuesToVector(vector);
 		MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
+	} else {
+		MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
 	}
-	MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Barrier(MPI_COMM_WORLD);  //  Aguarda todos os processos Chegarem neste ponto
 
-	MPI_Barrier(MPI_COMM_WORLD);
-
+	//  Cada processo cria um numero de buckets
+	Bucket *buckets;
+	int nbuckets_aux = 1;
 	if (nprocs < nbuckets) {
-		Bucket *buckets;
-		createBucketsInProcesses(buckets);
+		nbuckets_aux = createBucketsInProcesses(buckets);
 	} else {
 		if (rank < nbuckets) {
-			Bucket bucket;
-			printf("Rank %d criou um bucket\n", rank);
+			buckets = (Bucket *) malloc (sizeof(Bucket) * 1);
+			if (flag == 1)
+				printf("Processo Rank ( %d ) criou ( 1 ) bucket(s)\n",rank);
 		}
 	}
+	MPI_Barrier(MPI_COMM_WORLD);  //  Aguarda todos os processos Chegarem neste ponto
 
-	if (rank == 0)
-		printVector(vector);
-
-	MPI_Barrier(MPI_COMM_WORLD);
+	createInternalBuckets(vector, buckets, nbuckets_aux);
 
 	MPI_Finalize();
 	//  ************************************************************************
@@ -85,40 +84,13 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
-void createBucketsInProcesses(Bucket *buckets) {
-	int aux;
-	if (nbuckets % nprocs == 0) {
-		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * (nbuckets/nprocs));
-		aux = nbuckets/nprocs;
-	} else {
-		int quant_plus = nbuckets % nprocs, min, max, qnt;
-		int iterator = nbuckets - quant_plus;
-		if (rank < iterator) {
-			min = (rank*(nbuckets/nprocs));
-			max = ((rank+1)*(nbuckets/nprocs))-1;
-			if (rank == ((nprocs - quant_plus)-1))
-				MPI_Send(&max, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
-		} else {
-			MPI_Recv(&min, 1, MPI_INT, rank-1, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			min = min + 1;
-			max =  min + (nbuckets/nprocs);
-			if (rank < (nprocs-1))
-				MPI_Send(&max, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
-		}
-		qnt = (max-min)+1;
-		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * (qnt));
-		aux = qnt;
-		printf("Minimo = %d, Maximo = %d", min, max);
-	}
-}
+void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux) {
+	int iterator = 0, quant_plus = tamvet % nbuckets_aux, inequal_buckets = 0;
 
-void createInternalBuckets(int  *vector, Bucket *buckets) {
-	int iterator = 0, quant_plus = tamvet % nbuckets, inequal_buckets = 0;
-
-	if (tamvet % nbuckets == 0) {
-		iterator = nbuckets;
+	if (tamvet % nbuckets_aux == 0) {
+		iterator = nbuckets_aux;
 	} else {
-		iterator = nbuckets - quant_plus;
+		iterator = nbuckets_aux - quant_plus;
 		inequal_buckets = 1;
 	}
 
@@ -159,6 +131,33 @@ void createInternalBuckets(int  *vector, Bucket *buckets) {
 			}
 		}
 	}
+}
+
+int createBucketsInProcesses(Bucket *buckets) {
+	int qnt;
+	if (nbuckets % nprocs == 0) {
+		qnt = nbuckets/nprocs;
+		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * qnt);
+	} else {
+		int quant_plus = nbuckets % nprocs, min, max;
+		int iterator = nprocs - quant_plus;
+		if (rank < iterator) {
+			min = (rank*(nbuckets/nprocs));
+			max = ((rank+1)*(nbuckets/nprocs))-1;
+			if (rank == ((nprocs - quant_plus)-1))
+				MPI_Send(&max, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
+		} else {
+			MPI_Recv(&min, 1, MPI_INT, rank-1, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			min = min + 1;
+			max =  min + (nbuckets/nprocs);
+			if (rank < (nprocs-1))
+				MPI_Send(&max, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
+		}
+		qnt = (max-min)+1;
+		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * (qnt));
+	}
+	if (flag == 1)
+		printf("Processo Rank ( %d ) criou ( %d ) bucket(s)\n",rank, qnt);
 }
 
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets) {
