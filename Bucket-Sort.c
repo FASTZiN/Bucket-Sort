@@ -16,12 +16,11 @@ typedef struct Bucket {
 
 void printVector(int vector[]);  //  Usado para printar tanto o vetor original desordenado quanto o vetor ordenado posteriormente.
 void setRandomValuesToVector(int vector[]);  //  Seta valores aleatorios ao vetor desordenado.
-void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int turn);  // Usado pelos processos MPI para setar os atributos MAX e MIN e QUANT de seus buckets
+void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int actual);  // Usado pelos processos MPI para setar os atributos MAX e MIN e QUANT de seus buckets
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets);  //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
 void ordenateBuckets(Bucket *buckets);  //  Usado pelos processos MPI para ordenar cada bucket.
 void concatenateBuckets(int *vector, Bucket *buckets);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
 int createBucketsInProcesses(Bucket *buckets);  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
-int whenTurnIterations(int nbuckets_aux);
 
 int main(int argc, char *argv[]) {
 	//  Recebendo dados via Linha de Comando.
@@ -75,7 +74,17 @@ int main(int argc, char *argv[]) {
 	}
 	MPI_Barrier(MPI_COMM_WORLD);  //  Aguarda todos os processos Chegarem neste ponto
 
-	int turn = whenTurnIterations(nbuckets_aux);
+	int num_ant = 0, num_atual = 0;
+	if (rank > 0)
+		MPI_Recv(&num_ant, 1, MPI_INT, rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+	createInternalBuckets(vector, buckets, nbuckets_aux, num_ant);
+
+	num_atual = num_ant + nbuckets_aux;
+
+	if (rank < nprocs-1)
+		MPI_Isend(&num_atual, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
+
 
 	MPI_Finalize();
 	//  ************************************************************************
@@ -85,25 +94,7 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
-int whenTurnIterations(int nbuckets_aux) {
-	int resp = 0, nbuckets_ant = 0;
-
-	MPI_Isend(&nbuckets_aux, 1, MPI_INT, rank+1, 1, MPI_COMM_WORLD,0);
-
-	if (rank > 0) {
-		MPI_Recv(&nbuckets_ant, 1, MPI_INT, rank-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-		MPI_Recv(&resp, 1, MPI_INT, rank-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-	}
-	if (nbuckets_ant == nbuckets-1)
-		resp = 1;
-
-	MPI_Isend(&resp, 1, MPI_INT, rank+1, 2, MPI_COMM_WORLD,0);
-
-	printf("Numero de buckets anterior = %d , Atual = %d , Turn = %d", nbuckets_ant, nbuckets_aux, resp);
-	return resp;
-}
-
-void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int turn) {
+void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int actual) {
 	int iterator = 0, quant_plus = tamvet % nbuckets, inequal_buckets = 0;
 
 	if (tamvet % nbuckets == 0) {
