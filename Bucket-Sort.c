@@ -20,6 +20,7 @@ void createInternalBuckets(int *vector, Bucket *buckets);  //  Usado pelos proce
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets);  //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
 void ordenateBuckets(Bucket *buckets);  //  Usado pelos processos MPI para ordenar cada bucket.
 void concatenateBuckets(int *vector, Bucket *buckets);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
+void createBucketsInProcesses(Bucket *buckets);
 
 int main(int argc, char *argv[]) {
 	//  Recebendo dados via Linha de Comando.
@@ -61,13 +62,20 @@ int main(int argc, char *argv[]) {
 
 	MPI_Barrier(MPI_COMM_WORLD);
 
-	if (rank == 0) {
-		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * nbuckets);  //  Aloca na memoria de todos os processos um vetor de buckets
+	if (nprocs < nbuckets) {
+		Bucket *buckets;
+		createBucketsInProcesses(buckets);
+	} else {
+		if (rank < nbuckets) {
+			Bucket bucket;
+			printf("Rank %d criou um bucket\n", rank);
+		}
 	}
 
+	if (rank == 0)
+		printVector(vector);
 
-
-
+	MPI_Barrier(MPI_COMM_WORLD);
 
 	MPI_Finalize();
 	//  ************************************************************************
@@ -77,8 +85,31 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
-void createInternalBucket(int *vector, Bucket *bucket) {
-
+void createBucketsInProcesses(Bucket *buckets) {
+	int aux;
+	if (nbuckets % nprocs == 0) {
+		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * (nbuckets/nprocs));
+		aux = nbuckets/nprocs;
+	} else {
+		int quant_plus = nbuckets % nprocs, min, max, qnt;
+		int iterator = nbuckets - quant_plus;
+		if (rank < iterator) {
+			min = (rank*(nbuckets/nprocs));
+			max = ((rank+1)*(nbuckets/nprocs))-1;
+			if (rank == ((nprocs - quant_plus)-1))
+				MPI_Send(&max, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
+		} else {
+			MPI_Recv(&min, 1, MPI_INT, rank-1, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			min = min + 1;
+			max =  min + (nbuckets/nprocs);
+			if (rank < (nprocs-1))
+				MPI_Send(&max, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
+		}
+		qnt = (max-min)+1;
+		Bucket *buckets = (Bucket *) malloc (sizeof(Bucket) * (qnt));
+		aux = qnt;
+		printf("Minimo = %d, Maximo = %d", min, max);
+	}
 }
 
 void createInternalBuckets(int  *vector, Bucket *buckets) {
