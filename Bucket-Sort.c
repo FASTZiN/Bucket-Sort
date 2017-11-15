@@ -18,7 +18,7 @@ void printVector(int vector[]);  //  Usado para printar tanto o vetor original d
 void setRandomValuesToVector(int vector[]);  //  Seta valores aleatorios ao vetor desordenado.
 void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int actual);  // Usado pelos processos MPI para setar os atributos MAX e MIN e QUANT de seus buckets
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets, int nbuckets_aux); //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
-void ordenateBuckets(Bucket *buckets);  //  Usado pelos processos MPI para ordenar cada bucket.
+void ordenateBuckets(Bucket *buckets, int nbuckets_aux);  //  Usado pelos processos MPI para ordenar cada bucket.
 void concatenateBuckets(int *vector, Bucket *buckets);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
 int getNumOfBuckets();  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
 int checkParameters(int argc, int tam_vet, int nbuck, char *program_name);  //  Usada para verificar se o inicio da execução e os parametros passados estão corretos
@@ -76,20 +76,19 @@ int main(int argc, char *argv[]) {
 			MPI_Send(&num_atual, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
 	}
 
-	//  Cada processo seta os valores que encaixam no intervalo de buckets nos vetores de inteiros de cada bucket
+	if (rank == 0 && flag == 1)
+		printVector(vector);
+
 	if (nbuckets_aux > 0) {
+		//  Cada processo seta os valores que encaixam no intervalo de buckets nos vetores de inteiros de cada bucket
 		setIntervalValuesInBuckets(vector, buckets, nbuckets_aux);
 
-		if (flag == 1) {
-			for (int i = 0; i < nbuckets_aux; i++) {
-				printf("RANK (%d) e Bucket (%d) com min = %d, max = %d e qnt = %d\n", rank, i, buckets[i].min, buckets[i].max, buckets[i].quant);
-				for (int j = 0; j < buckets[i].quant; j++)
-					printf("     RANK (%d) e Bucket (%d) ==> Valor ( %d ) = %d\n", rank, i, j, buckets[i].bucket_vector[j]);
-			}
-		}
+		//  Cada processo ordena os seus buckets internos
+		ordenateBuckets(buckets, nbuckets_aux);
+
 	}
 
-	//  Cada processo ordena os seus buckets internos
+
 
 
 
@@ -208,8 +207,8 @@ void setIntervalValuesInBuckets(int *vector, Bucket *buckets, int nbuckets_aux) 
 	}
 }
 
-void ordenateBuckets(Bucket *buckets) {
-	for (int i = 0; i < nbuckets; i++) {
+void ordenateBuckets(Bucket *buckets, int nbuckets_aux) {
+	for (int i = 0; i < nbuckets_aux; i++) {
 		for (int fim = buckets[i].quant-1; fim > 0; fim--) {
 			for (int t = 0; t < fim; ++t) {
 				if (buckets[i].bucket_vector[t] > buckets[i].bucket_vector[t+1]) {
