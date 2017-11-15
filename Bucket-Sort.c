@@ -19,7 +19,7 @@ void setRandomValuesToVector(int vector[]);  //  Seta valores aleatorios ao veto
 void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int actual);  // Usado pelos processos MPI para setar os atributos MAX e MIN e QUANT de seus buckets
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets, int nbuckets_aux); //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
 void ordenateBuckets(Bucket *buckets, int nbuckets_aux);  //  Usado pelos processos MPI para ordenar cada bucket.
-void concatenateBuckets(int *vector, Bucket *buckets);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
+void concatenateBuckets(int *vector, Bucket *buckets, int nbuckets_aux);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
 int getNumOfBuckets();  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
 int checkParameters(int argc, int tam_vet, int nbuck, char *program_name);  //  Usada para verificar se o inicio da execução e os parametros passados estão corretos
 
@@ -89,6 +89,12 @@ int main(int argc, char *argv[]) {
 	}
 
 
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	concatenateBuckets(vector, buckets, nbuckets_aux);
+
+	if(rank == 0){
+	printVector(vector);}
 
 
 
@@ -221,14 +227,62 @@ void ordenateBuckets(Bucket *buckets, int nbuckets_aux) {
 	}
 }
 
-void concatenateBuckets(int *vector, Bucket *buckets) {
+void concatenateBuckets(int *vector, Bucket *buckets, int nbuckets_aux) {
+	if(rank!= 0){
+			MPI_Send(&nbuckets_aux, 1, MPI_INT, 0, 2, MPI_COMM_WORLD);
+			for(int i = 0; i < nbuckets_aux ;i++){
+				MPI_Send(&buckets[i].quant, 1, MPI_INT, 0, i, MPI_COMM_WORLD);
+				MPI_Send(&buckets[i].bucket_vector, buckets[i].quant, MPI_INT, 0, i, MPI_COMM_WORLD);
+			 }
+	}
+	if (rank == 0){
 	int cont = 0;
-	for (int i = 0; i < nbuckets; i++) {
-		for (int j = 0; j < buckets[i].quant; j++) {
-			vector[cont] = buckets[i].bucket_vector[j];
-			cont++;
+	for(int i = 0; i < nbuckets_aux; i++){
+				for (int j = 0; j < buckets[i].quant; j++) {
+					vector[cont] = buckets[i].bucket_vector[j];
+					cont++;
+				}
+	}
+	printf("Cheguei ate aq \n");
+	if(nprocs < nbuckets){
+		for(int i = 1; i < nprocs; i++) {
+				int buckets_aux;
+				MPI_Recv(&buckets_aux, 1, MPI_INT, i, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				printf("Buckets: %d \n", buckets_aux);
+				for(int k = 0; k < buckets_aux; k++){
+					 int rec_quant;
+					 int *rec_bucket;
+				     MPI_Recv(&rec_quant, 1, MPI_INT, i, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				     printf("Quantidado do vetor: %d \n", rec_quant);
+				     if(rec_quant != 0){
+				     // MPI_Recv(&rec_bucket, rec_quant, MPI_INT, i, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				      // printf("P(%d) = %d \n", 0, rec_bucket[0]);
+				      for (int j = 0; j < rec_quant; j++) {
+				     	//vector[cont] = rec_bucket[j];
+				    	//  printf("P(%d) = %d", j , rec_bucket[j]);
+				    	cont++;
+				     }
+				   }
+				}
+			}
+	} else {
+		for(int i = 1; i < nbuckets; i++) {
+			int rec_quant;
+			int *rec_bucket;
+			MPI_Recv(&rec_quant, 1, MPI_INT, i, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			printf("Quantidado do vetor: %d \n", rec_quant);
+			if(rec_quant != 0){
+			// MPI_Recv(&rec_bucket, rec_quant, MPI_INT, i, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			// printf("P(%d) = %d \n", 0, rec_bucket[0]);
+				for (int j = 0; j < rec_quant; j++) {
+					//vector[cont] = rec_bucket[j];
+					//  printf("P(%d) = %d", j , rec_bucket[j]);
+					cont++;
+				}
+			}
 		}
 	}
+  }
 }
 
 void printVector(int vector[]) {
@@ -244,7 +298,7 @@ void setRandomValuesToVector(int vector[]) {
 	srand(time(NULL));
 	for(int i = 0 ; i < tamvet ; i++)
 		vector[i] = rand() % (tamvet-1);
-};
+}
 
 int checkParameters(int argc, int tam_vet, int nbuck, char *program_name) {
 	int resp = 0;
