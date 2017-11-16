@@ -14,12 +14,12 @@ typedef struct Bucket {
 	int* bucket_vector;
 } Bucket;
 
-void printVector(int vector[]);  //  Usado para printar tanto o vetor original desordenado quanto o vetor ordenado posteriormente.
+void printVector(int vector[], int signal);  //  Usado para printar tanto o vetor original desordenado quanto o vetor ordenado posteriormente.
 void setRandomValuesToVector(int vector[]);  //  Seta valores aleatorios ao vetor desordenado.
 void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int actual);  // Usado pelos processos MPI para setar os atributos MAX e MIN e QUANT de seus buckets
 void setIntervalValuesInBuckets(int *vector, Bucket *buckets, int nbuckets_aux); //  Usado pelos processos MPI para vasculhar o vetor desordenado e colocar os numeros nos buckes segundo o intervalo de tal bucket.
 void ordenateBuckets(Bucket *buckets, int nbuckets_aux);  //  Usado pelos processos MPI para ordenar cada bucket.
-void concatenateBuckets(int *vector, Bucket *buckets, int nbuckets_aux);  // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
+void concatenateBuckets(int *vector, Bucket *buckets, int nbuckets_aux); // Usado pelos processo MPI para concatenar os buckets (Cada processo ir� modificar uma parte do vetor, sem problemas de condi��o de corrida).
 int getNumOfBuckets();  //  Usado pelos processos MPI para criar buckets (Cada processo cria 1 at� alcan�ar o numero de buckets necessarios).
 int checkParameters(int argc, int tam_vet, int nbuck, char *program_name);  //  Usada para verificar se o inicio da execução e os parametros passados estão corretos
 
@@ -46,6 +46,8 @@ int main(int argc, char *argv[]) {
 	//  Vetor com os valores randomicos é transmitido a todos os processos
 	if (rank == 0) {
 		setRandomValuesToVector(vector);
+		if (flag == 1)
+			printVector(vector, 0);
 		MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
 	} else {
 		MPI_Bcast(vector, tamvet, MPI_INT, 0, MPI_COMM_WORLD);
@@ -76,26 +78,20 @@ int main(int argc, char *argv[]) {
 			MPI_Send(&num_atual, 1, MPI_INT, rank+1, 0, MPI_COMM_WORLD);
 	}
 
-	if (rank == 0 && flag == 1)
-		printVector(vector);
-
 	if (nbuckets_aux > 0) {
 		//  Cada processo seta os valores que encaixam no intervalo de buckets nos vetores de inteiros de cada bucket
 		setIntervalValuesInBuckets(vector, buckets, nbuckets_aux);
 
 		//  Cada processo ordena os seus buckets internos
 		ordenateBuckets(buckets, nbuckets_aux);
-
 	}
 
 
-	MPI_Barrier(MPI_COMM_WORLD);
+	//  Função concatena cada bucket de cada processo no vector de um processo, neste caso, no vector do processo de rank 0
+	concatenateBuckets(vector, buckets,nbuckets_aux);
 
-	concatenateBuckets(vector, buckets, nbuckets_aux);
-
-	if(rank == 0){
-	printVector(vector);}
-
+	if ((rank == 0) && (flag == 1))
+		printVector(vector, 1);
 
 
 	MPI_Finalize();
@@ -160,8 +156,6 @@ void createInternalBuckets(int  *vector, Bucket *buckets, int nbuckets_aux, int 
 				buckets[index].quant = 0;
 			}
 		}
-		if (flag == 1)
-			printf("Rank ( %d ) setou Min = %u, Max = %u e Quant = %d no Bucket %d\n",rank, buckets[index].min, buckets[index].max, buckets[index].quant, i);
 		index++;
 	}
 }
@@ -193,8 +187,6 @@ int getNumOfBuckets() {
 		else
 			qnt = 0;
 	}
-	if (flag == 1)
-		printf("Processo Rank ( %d ) criou ( %d ) bucket(s)\n",rank, qnt);
 	return qnt;
 }
 
@@ -228,64 +220,61 @@ void ordenateBuckets(Bucket *buckets, int nbuckets_aux) {
 }
 
 void concatenateBuckets(int *vector, Bucket *buckets, int nbuckets_aux) {
-	if(rank!= 0){
-			MPI_Send(&nbuckets_aux, 1, MPI_INT, 0, 2, MPI_COMM_WORLD);
-			for(int i = 0; i < nbuckets_aux ;i++){
-				MPI_Send(&buckets[i].quant, 1, MPI_INT, 0, i, MPI_COMM_WORLD);
-				MPI_Send(&buckets[i].bucket_vector, buckets[i].quant, MPI_INT, 0, i, MPI_COMM_WORLD);
-			 }
-	}
-	if (rank == 0){
-	int cont = 0;
-	for(int i = 0; i < nbuckets_aux; i++){
-				for (int j = 0; j < buckets[i].quant; j++) {
-					vector[cont] = buckets[i].bucket_vector[j];
-					cont++;
-				}
-	}
-	printf("Cheguei ate aq \n");
-	if(nprocs < nbuckets){
-		for(int i = 1; i < nprocs; i++) {
-				int buckets_aux;
-				MPI_Recv(&buckets_aux, 1, MPI_INT, i, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				printf("Buckets: %d \n", buckets_aux);
-				for(int k = 0; k < buckets_aux; k++){
-					 int rec_quant;
-					 int *rec_bucket;
-				     MPI_Recv(&rec_quant, 1, MPI_INT, i, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				     printf("Quantidado do vetor: %d \n", rec_quant);
-				     if(rec_quant != 0){
-				     // MPI_Recv(&rec_bucket, rec_quant, MPI_INT, i, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				      // printf("P(%d) = %d \n", 0, rec_bucket[0]);
-				      for (int j = 0; j < rec_quant; j++) {
-				     	//vector[cont] = rec_bucket[j];
-				    	//  printf("P(%d) = %d", j , rec_bucket[j]);
-				    	cont++;
-				     }
-				   }
-				}
-			}
-	} else {
-		for(int i = 1; i < nbuckets; i++) {
-			int rec_quant;
-			int *rec_bucket;
-			MPI_Recv(&rec_quant, 1, MPI_INT, i, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			printf("Quantidado do vetor: %d \n", rec_quant);
-			if(rec_quant != 0){
-			// MPI_Recv(&rec_bucket, rec_quant, MPI_INT, i, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			// printf("P(%d) = %d \n", 0, rec_bucket[0]);
-				for (int j = 0; j < rec_quant; j++) {
-					//vector[cont] = rec_bucket[j];
-					//  printf("P(%d) = %d", j , rec_bucket[j]);
-					cont++;
-				}
+	int size_vector = 0, actual = 0, max;
+
+	int *aux_vector;
+	for (int i = 0; i < nbuckets_aux; i++)
+		size_vector =  size_vector + buckets[i].quant;
+
+	if (size_vector > 0) {
+		aux_vector = (int *) malloc (sizeof (int) * size_vector);
+
+		size_vector = 0;
+		for (int i = 0; i < nbuckets_aux; i++) {
+			for (int j = 0; j < buckets[i].quant; j++) {
+				aux_vector[size_vector] = buckets[i].bucket_vector[j];
+				size_vector++;
 			}
 		}
 	}
-  }
+
+	if (rank == 0) {
+		MPI_Send(&size_vector, 1, MPI_INT, rank+1, 2, MPI_COMM_WORLD);
+		max = size_vector;
+	} else {
+		MPI_Recv(&actual, 1, MPI_INT, rank-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		max = actual+size_vector;
+		if (rank < nprocs-1)
+			MPI_Send(&max, 1, MPI_INT, rank+1, 2, MPI_COMM_WORLD);
+	}
+
+	if (nprocs > 0) {
+		if (rank == 0) {
+
+			for (int i = 0; i < size_vector; i++) {
+				vector[i] = aux_vector[i];
+			}
+
+			for (int i = 1; i < nprocs; i++) {
+				MPI_Recv(&size_vector, 1, MPI_INT, i, i+3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&actual, 1, MPI_INT, i, i+4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&max, 1, MPI_INT, i, i+5, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				MPI_Recv(&vector[actual], size_vector, MPI_INT, i, i+6, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			}
+		} else {
+				MPI_Send(&size_vector, 1, MPI_INT, 0, rank+3, MPI_COMM_WORLD);
+				MPI_Send(&actual, 1, MPI_INT, 0, rank+4, MPI_COMM_WORLD);
+				MPI_Send(&max, 1, MPI_INT, 0, rank+5, MPI_COMM_WORLD);
+				MPI_Send(aux_vector, size_vector, MPI_INT, 0, rank+6, MPI_COMM_WORLD);
+		}
+	}
 }
 
-void printVector(int vector[]) {
+void printVector(int vector[], int signal) {
+	if (signal == 0)
+		printf("(Desordenado)");
+	else
+		printf("(Ordenado)");
 	printf("\nAbaixo será apresentado o vetor de %d posições com seus valores atuais:\n\n", tamvet);
 	for(int i = 0; i < tamvet; i++){
 			printf("Posição ( %d ), Valor = %d",i, vector[i]);
@@ -298,7 +287,7 @@ void setRandomValuesToVector(int vector[]) {
 	srand(time(NULL));
 	for(int i = 0 ; i < tamvet ; i++)
 		vector[i] = rand() % (tamvet-1);
-}
+};
 
 int checkParameters(int argc, int tam_vet, int nbuck, char *program_name) {
 	int resp = 0;
@@ -315,3 +304,4 @@ int checkParameters(int argc, int tam_vet, int nbuck, char *program_name) {
 	}
 	return resp;
 }
+
